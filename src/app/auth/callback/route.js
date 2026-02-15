@@ -13,6 +13,12 @@ export async function GET(request) {
 
   if (code) {
     const supabase = await createClient();
+    if (!supabase) {
+      // Supabase isn't configured on the server — redirect to login so
+      // the developer can set env vars. We don't throw so users see a friendly redirect.
+      return NextResponse.redirect(`${origin}/login?error=config`);
+    }
+
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
       // Successfully logged in — go to dashboard

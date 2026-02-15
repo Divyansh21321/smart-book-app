@@ -36,13 +36,17 @@ export default function Dashboard() {
         // 2. Fetch this user's bookmarks from the database
         //    RLS ensures we only get OUR bookmarks even without a WHERE clause,
         //    but we add it for clarity.
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("bookmarks")
           .select("*")
           .eq("user_id", user.id)
           .order("created_at", { ascending: false });
 
-        setBookmarks(data || []);
+        if (error) {
+          console.error("Failed to fetch bookmarks:", error.message);
+        } else {
+          setBookmarks(data || []);
+        }
       }
       setLoading(false);
     };
@@ -92,16 +96,28 @@ export default function Dashboard() {
     e.preventDefault();
     if (!title.trim() || !url.trim()) return;
 
-    // Insert into Supabase. RLS ensures user_id must match auth.uid().
-    // The realtime subscription will automatically pick up the new row
-    // and add it to the list (even in other tabs!).
-    const { error } = await supabase.from("bookmarks").insert({
-      title: title.trim(),
-      url: url.trim(),
-      user_id: user.id,
-    });
+    // Insert into Supabase and get the inserted row back with .select().
+    // This way we update the UI immediately without relying on realtime.
+    const { data, error } = await supabase
+      .from("bookmarks")
+      .insert({
+        title: title.trim(),
+        url: url.trim(),
+        user_id: user.id,
+      })
+      .select();
 
-    if (!error) {
+    if (error) {
+      console.error("Failed to add bookmark:", error.message);
+      alert("Failed to add bookmark: " + error.message);
+    } else {
+      // Add the new bookmark to the top of the list immediately
+      if (data && data.length > 0) {
+        setBookmarks((prev) => {
+          if (prev.some((b) => b.id === data[0].id)) return prev;
+          return [data[0], ...prev];
+        });
+      }
       setTitle("");
       setUrl("");
     }
@@ -111,9 +127,13 @@ export default function Dashboard() {
   // DELETE BOOKMARK
   // ───────────────────────────────────────────────
   const deleteBookmark = async (id) => {
-    // Delete from Supabase. RLS ensures you can only delete YOUR bookmarks.
-    // The realtime subscription picks up the DELETE event and removes it from the list.
-    await supabase.from("bookmarks").delete().eq("id", id);
+    // Remove from UI immediately (optimistic update)
+    setBookmarks((prev) => prev.filter((b) => b.id !== id));
+    // Then delete from Supabase. RLS ensures you can only delete YOUR bookmarks.
+    const { error } = await supabase.from("bookmarks").delete().eq("id", id);
+    if (error) {
+      console.error("Failed to delete bookmark:", error.message);
+    }
   };
 
   // ───────────────────────────────────────────────
